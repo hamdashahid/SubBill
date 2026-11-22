@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import tempfile
 import pandas as pd
 from datetime import date, timedelta
 import streamlit as st
@@ -33,8 +34,10 @@ with tabs[1]:
   try:
    frame=pd.read_csv(up); st.dataframe(frame,use_container_width=True)
    if st.button('Validate and process statement'):
-    temp=ROOT/'data'/'uploads'; temp.mkdir(parents=True,exist_ok=True); path=temp/(Path(up.name).name); path.write_bytes(up.getvalue())
-    count=parse_statement_csv(db,user,path,int(cycle)); st.success(f'Processed {count} transaction rows. Re-uploading identical content is idempotent.')
+    with tempfile.TemporaryDirectory() as temp_dir:
+     path=Path(temp_dir)/Path(up.name).name; path.write_bytes(up.getvalue())
+     count=parse_statement_csv(db,user,path,int(cycle))
+    st.success(f'Processed {count} transaction rows. Re-uploading identical content is idempotent.')
   except Exception as e: st.error(f'CSV validation failed: {e}')
  st.caption('Required columns: date, description, amount, currency. Optional: memo.')
 with tabs[2]:
@@ -44,7 +47,7 @@ with tabs[2]:
  findings=st.session_state.get('review_findings',[])
  for f in findings:
   with st.expander(f"{f['merchant']} · {f['type']}",expanded=True):
-   st.write(f['detail']); st.write('**Agent recommendation:**',f['recommended_action']); st.write(f['rationale']); st.write('**Previous decision:**',f['previous_decision'] or 'No previous decision'); st.write('**Retrieved usage evidence:**',f.get('usage_evidence',[]) or 'No saved usage evidence')
+   st.write('**Agent recommendation:**',f['recommended_action']); st.write(f['rationale']); st.write('**Retrieved evidence references:**',f['evidence_refs'] or 'No saved usage evidence')
    reason=st.text_input('Reason',key=f"reason_{f['issue_id']}")
    cols=st.columns(3)
    for col,label,val in zip(cols,['Keep','Cancel','Review later'],['keep','cancel','review_later']):
@@ -75,7 +78,7 @@ with tabs[5]:
  if st.button('Generate UNSENT cancellation draft'):
   if m.strip(): st.session_state['draft']=draft_cancellation(db,user,m.strip())
  if 'draft' in st.session_state: st.warning('UNSENT — this text has not been sent anywhere.'); st.code(st.session_state['draft'])
- st.dataframe(pd.DataFrame([dict(x) for x in db.execute('SELECT merchant_key,label,body,created_at FROM drafts WHERE user_id=?',(user,))]),use_container_width=True)
+ st.dataframe(pd.DataFrame([dict(x) for x in db.execute('SELECT merchant_key,label,body FROM drafts WHERE user_id=?',(user,))]),use_container_width=True)
 with tabs[6]:
  for title,sql in [('Decisions','SELECT * FROM decisions WHERE user_id=? ORDER BY id DESC'),('Issues','SELECT * FROM issues WHERE user_id=? ORDER BY issue_id DESC'),('Tool/action logs','SELECT * FROM action_log WHERE user_id=? ORDER BY id DESC'),('Source files','SELECT * FROM source_files WHERE user_id=? ORDER BY ingested_at DESC')]:
   st.subheader(title); st.dataframe(pd.DataFrame([dict(x) for x in db.execute(sql,(user,))]),use_container_width=True)
